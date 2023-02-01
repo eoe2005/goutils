@@ -8,6 +8,7 @@ import (
 func SqlMergeTable(src, desc string) string {
 	srcTable := strmysqlparseTable(src)
 	descTable := strmysqlparseTable(desc)
+	fmt.Printf("--->\n%v\n\ndesc -->\n%v\n\n\n", srcTable, descTable)
 	fields := []string{}
 	for k, item := range srcTable.Fields {
 		old, ok := descTable.Fields[k]
@@ -28,10 +29,15 @@ func SqlMergeTable(src, desc string) string {
 	for k, item := range srcTable.Indexs {
 		_, ok := descTable.Indexs[k]
 		if !ok {
-			fields = append(fields, fmt.Sprintf("ADD %s `%s`(`%s`)", item.OpType, k, strings.Join(item.Keys, "`,`")))
+			if item.OpType == "PRIMARY KEY" {
+				fields = append(fields, fmt.Sprintf("ADD %s (`%s`)", item.OpType, strings.Join(item.Keys, "`,`")))
+			} else {
+				fields = append(fields, fmt.Sprintf("ADD %s `%s`(`%s`)", item.OpType, k, strings.Join(item.Keys, "`,`")))
+			}
+
 		}
 	}
-	for k, _ := range descTable.Fields {
+	for k, _ := range descTable.Indexs {
 		item, ok := srcTable.Indexs[k]
 		if !ok {
 			fields = append(fields, fmt.Sprintf("DROP %s `%s`", item.OpType, k))
@@ -74,8 +80,10 @@ func strmysqlparseTable(data string) strmysqltable {
 		return ret
 	}
 	ret.Name = tableName
-	data = data[index:]
-	_, body := StrGetBody(data, "(", ")")
+	body := data[index:]
+	index = strings.Index(body, "(")
+	body = body[index+1:]
+	// _, body := StrGetBody(data, "(", ")")
 	lines := strings.Split(body, ",")
 	Pre := ""
 	for _, line := range lines {
@@ -137,7 +145,7 @@ func strlineParsestrmysqltablefield(src string) *strmysqltablefield {
 			i += 2
 		case "COMMENT":
 			val := strings.ToUpper(strings.TrimSpace(data[i+1]))
-			_, ret.Comment = StrGetBody(val, "'", ",")
+			_, ret.Comment = StrGetBody(val, "'", "'")
 			i += 1
 		default:
 			if ret.Type == "" {
@@ -183,21 +191,12 @@ func strlineParsesstrmysqltableindex(src string) *strmysqltableindex {
 		ret.OpType = "UNIQUE"
 		ret.Keys = strings.Split(val, "`,`")
 	}
-
+	if ret.OpType == "" || len(ret.Keys) == 0 {
+		return nil
+	}
 	return ret
 
 }
-
-// CREATE TABLE IF NOT EXISTS `tb_msg_chat_content` (
-// 	`id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-// 	`msg_key` varchar(44) NOT NULL DEFAULT '' COMMENT '消息key',
-// 	`user_id` bigint(20) UNSIGNED NOT NULL DEFAULT 0 COMMENT '发布人',
-// 	`target_user_id` bigint(20) UNSIGNED NOT NULL DEFAULT 0 COMMENT '目标用户级id',
-// 	`msg` varchar(1024) NOT NULL DEFAULT '' COMMENT '消息内容',
-// 	`create_at` datetime NOT NULL DEFAULT current_timestamp() COMMENT '创建时间',
-// 	`update_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp() COMMENT '最后更新时间',
-// 	PRIMARY KEY (`id`)
-//   ) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COMMENT='im消息 内容';
 
 type strmysqltablefield struct {
 	Name    string
