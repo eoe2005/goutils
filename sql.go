@@ -64,15 +64,143 @@ func buildsqlline(op, key string, desc strmysqltablefield, src, old strmysqltabl
 }
 
 func strmysqlparseTable(data string) strmysqltable {
-	tableName := ""
 	fields := map[string]strmysqltablefield{}
-	return strmysqltable{
-		Name:   tableName,
+	ret := strmysqltable{
 		Fields: fields,
+		Indexs: map[string]strmysqltableindex{},
 	}
+	index, tableName := StrGetBody(data, "`", "`")
+	if index < 0 {
+		return ret
+	}
+	ret.Name = tableName
+	data = data[index:]
+	_, body := StrGetBody(data, "(", ")")
+	lines := strings.Split(body, ",")
+	Pre := ""
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "`") { //字段
+			ft := strlineParsestrmysqltablefield(line)
+			if ft != nil {
+				ft.Pre = Pre
+				Pre = ft.Name
+				ret.Fields[ft.Name] = *ft
+			}
+		} else { //索引
+			ft := strlineParsesstrmysqltableindex(line)
+			if ft != nil {
+				ret.Indexs[ft.Name] = *ft
+			}
+		}
+	}
+	return ret
+}
+func strlineParsestrmysqltablefield(src string) *strmysqltablefield {
+	ret := &strmysqltablefield{
+		IsNull: false,
+	}
+	i, name := StrGetBody(src, "`", "`")
+	if i < 0 {
+		return nil
+	}
+	src = strings.TrimSpace(src[i:])
+	data := strings.Split(src, " ")
+	l := len(data)
+	ret.Name = name
+	for i := 0; i < l; i++ {
+		tag := strings.ToUpper(strings.TrimSpace(data[i]))
+		switch tag {
+		case "":
+			break
+		case "UNSIGNED":
+			ret.Type += " UNSIGNED"
+		case "NOT":
+			if strings.ToUpper(strings.TrimSpace(data[i+1])) == "NULL" {
+				i += 1
+				ret.IsNull = false
+			}
+		case "AUTO_INCREMENT":
+			ret.Ext = "AUTO_INCREMENT"
+		case "DEFAULT":
+			val := strings.ToUpper(strings.TrimSpace(data[i+1]))
+			if strings.HasPrefix(val, "'") {
+				_, ret.Default = StrGetBody(val, "'", "'")
+			} else {
+				ret.Default = val
+			}
+			i += 1
+		case "ON":
+			op := strings.ToUpper(strings.TrimSpace(data[i+1]))
+			val := strings.ToUpper(strings.TrimSpace(data[i+2]))
+			ret.Ext = fmt.Sprintf("%s %s %s", tag, op, val)
+			i += 2
+		case "COMMENT":
+			val := strings.ToUpper(strings.TrimSpace(data[i+1]))
+			_, ret.Comment = StrGetBody(val, "'", ",")
+			i += 1
+		default:
+			if ret.Type == "" {
+				ret.Type = tag
+			}
+		}
+	}
+	return ret
+}
+func strlineParsesstrmysqltableindex(src string) *strmysqltableindex {
+	src = strings.ToLower(strings.TrimSpace(src))
+	ret := &strmysqltableindex{}
+	if strings.HasPrefix(src, "primary") {
+		i, val := StrGetBody(src, "(`", "`)")
+		if i < 0 {
+			return nil
+		}
+		ret.Name = ""
+		ret.OpType = "PRIMARY KEY"
+		ret.Keys = strings.Split(val, "`,`")
+	} else if strings.HasPrefix(src, "key") || strings.HasPrefix(src, "index") {
+		i, val := StrGetBody(src, "(`", "`)")
+		if i < 0 {
+			return nil
+		}
+		i, name := StrGetBody(src, "`", "`")
+		if i < 0 {
+			return nil
+		}
+		ret.Name = name
+		ret.OpType = "INDEX"
+		ret.Keys = strings.Split(val, "`,`")
+	} else if strings.HasPrefix(src, "unique") {
+		i, val := StrGetBody(src, "(`", "`)")
+		if i < 0 {
+			return nil
+		}
+		i, name := StrGetBody(src, "`", "`")
+		if i < 0 {
+			return nil
+		}
+		ret.Name = name
+		ret.OpType = "UNIQUE"
+		ret.Keys = strings.Split(val, "`,`")
+	}
+
+	return ret
+
 }
 
+// CREATE TABLE IF NOT EXISTS `tb_msg_chat_content` (
+// 	`id` bigint(20) UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+// 	`msg_key` varchar(44) NOT NULL DEFAULT '' COMMENT '消息key',
+// 	`user_id` bigint(20) UNSIGNED NOT NULL DEFAULT 0 COMMENT '发布人',
+// 	`target_user_id` bigint(20) UNSIGNED NOT NULL DEFAULT 0 COMMENT '目标用户级id',
+// 	`msg` varchar(1024) NOT NULL DEFAULT '' COMMENT '消息内容',
+// 	`create_at` datetime NOT NULL DEFAULT current_timestamp() COMMENT '创建时间',
+// 	`update_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp() COMMENT '最后更新时间',
+// 	PRIMARY KEY (`id`)
+//   ) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COMMENT='im消息 内容';
+
 type strmysqltablefield struct {
+	Name    string
 	Type    string
 	IsNull  bool
 	Default string
